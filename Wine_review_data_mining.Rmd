@@ -1,0 +1,466 @@
+---
+title: "**Data Mining with Wine Reviews**"
+author: "Wesley Stanis"
+#runtime: shiny
+output:
+  html_document:  
+  #keep_md: true
+  #flexdashboard::flex_dashboard:
+    keep_md: true
+    orientation: columns
+    vertical_layout: fill
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(shiny)
+#```{r setup, include=FALSE}
+#knitr::opts_chunk$set(echo = TRUE)
+#```
+
+```
+
+
+
+```{r include=FALSE}
+library(tidyr)
+library(rpart)
+library(rattle)
+library(rpart.plot)
+library(RColorBrewer)
+library(Cairo)
+require(ggvis)
+require(caret)
+require(dplyr)
+require(wordcloud2)
+require(ggplot2)
+library("tm")
+library("wordcloud")
+library("stringr")
+library("slam")
+library("quanteda")
+library("SnowballC")
+library("arules")
+library(arules)
+library("factoextra")
+require(rpart)
+require(rpart.plot)
+require(e1071)
+require(kernlab)
+require(randomForest)
+library(shiny)
+
+```
+
+```{r echo=FALSE}
+setwd("C:\\Users\\wes\\Desktop\\Datasets")
+df <- read.csv("winemag.csv")
+df <- tbl_df(df)
+#str(df)
+```
+
+**Exploring the Data**
+=====================================================================
+
+
+
+### Countries
+```{r echo=FALSE}
+countries <- df %>%
+  group_by(country) %>%
+  count()
+
+countries <- countries[order(countries$n, decreasing = TRUE),]
+
+
+ggplot(countries, aes(reorder(country,n),n)) +
+  geom_bar(stat = "identity", col="Blue")  + 
+  labs(title = "Countries", 
+       y = "Reviews", x = "Country") +
+  theme(axis.text.x=element_text(angle =90))
+
+```
+
+
+
+### Price
+```{r echo=FALSE}
+
+summary(df$price)
+max(df$price, na.rm = TRUE)
+which.max(df$price)
+#Max price for wine
+df[80291,]
+
+ppc <- data.frame("country" = df$country, 
+                  "points" = df$points)
+ppc1 <- data.frame("country" = df$country, 
+                  "points" = df$points,
+                  "price" = df$price)
+
+ppcc <- data.frame(tapply(ppc$points, ppc$country, FUN=sum))
+ppcc$country <- row.names(ppcc)
+colnames(ppcc) <- c("total_points", "country")
+
+#ggplot(ppcc, aes(x=reorder(total_points), y=country)) + geom_point() +
+ # coord_cartesian(xlim = c(0, 2000000))
+
+```
+
+
+### Total Points by Country
+```{r echo=FALSE}
+ggplot(ppcc, aes(x=country, y=total_points)) + geom_bar(stat = "identity", col="Blue")+
+  theme(axis.text.x = element_text(angle = 90))
+
+```
+
+### Histogram of Points and Top Rated Country by Average Points
+```{r echo=FALSE}
+pointshist <- ggplot(df, aes(x=points)) + geom_histogram(binwidth = 1, color= 'blue') + 
+  coord_cartesian(xlim = c(70, 100))+
+  labs(title ="Total Points", x = "Points", y = "Reviews") 
+pointshist
+
+top <- ppc %>% group_by(country) %>%
+  summarise(AveragePoints = mean(points))
+top <- top %>% arrange(desc(AveragePoints))
+head(top, n=9)
+```
+
+
+
+### Price vs Points
+```{r echo=FALSE}
+df %>%
+  
+  ggplot(aes(x=df$points, y=df$price))+
+  geom_point(alpha=0.3) +
+  geom_smooth(method = lm) +
+  geom_count() +
+  theme_light()
+```
+
+
+
+### Top Rated Countries
+```{r echo=FALSE}
+ggplot(top, aes(reorder(x=country, -AveragePoints), y=AveragePoints)) + geom_bar(stat = 'identity') +
+  coord_cartesian(ylim = c(80, 95)) +
+  theme(axis.text.x = element_text(angle = 90))
+
+```
+
+
+**Association Rules Mining**
+==================================================================
+
+
+```{r echo=FALSE}
+tdf <- data.frame("country" = df$country, 
+                  "points" = df$points,
+                  "price" = df$price,
+                  "province" = df$province,
+                  "region" = df$region_1,
+                  "variety" = df$variety,
+                  "winery" = df$winery)
+ntdf <- data.frame("country" = df$country, 
+                   "points" = df$points,
+                   "price" = df$price,
+                   "variety" = df$variety)
+tdf$region <- NULL
+tdf$winery <- NULL
+min_points <- min(tdf$points)
+max_points <- max(tdf$points)
+bins = 5 
+width=(max_points - min_points)/bins;
+tdf$points = cut(tdf$points, breaks=seq(min_points, max_points, width))
+
+tdf$price <- as.numeric(tdf$price)
+
+tdf$price <- cut(tdf$price, breaks = c(0,10,20,30,40,50,60,Inf),
+              labels=c("very cheap","cheap","somewhat cheap",
+                       "average","somewhat expesive","expesive","very expensive"))
+
+
+dfrule <- df
+dfrule$region_1 <- NULL
+dfrule$region_2 <- NULL
+dfrule$points <- as.numeric(dfrule$points)
+
+#str(dfrule)
+```
+
+### Inspecting the Rules
+
+```{r echo=FALSE}
+
+
+dfrule$points <- cut(dfrule$points, breaks = c(81,85,90,95,100, Inf),
+               labels=c("poor rating","slightly below average","slightly above average",
+                        "above average","perfect ratings"))
+
+myRules = apriori(dfrule, parameter = list(supp = 0.003, conf = 0.9, maxlen = 5))
+
+rules<-apriori(data=dfrule, parameter=list(supp=0.0001,conf = 0.5), 
+               appearance = list(default="lhs",rhs="points=perfect ratings"),
+               control = list(verbose=F))
+rules2<-apriori(data=tdf, parameter=list(supp=0.0001,conf = 0.8, maxlen = 4), 
+               appearance = list(default="lhs",rhs="price=very expensive"),
+               control = list(verbose=F))
+```
+
+
+
+```{r}
+
+inspect(rules2[1:5])
+inspect(myRules[1:10])
+```
+
+
+
+**Support Vector Machine**
+==========================================================
+
+
+### Splitting the Data
+```{r echo=FALSE}
+ntdf1 <- ntdf %>%
+  filter(points > 94)
+x <- sample(nrow(ntdf1), nrow(ntdf1) * 2/3)
+xtrain <- ntdf1[x, ]
+xtest <- ntdf1[-x, ]
+xtest <- xtest %>% drop_na(country)
+
+
+ntdf2 <- na.omit(ntdf1)
+ntdf2$variety <- as.character(ntdf2$variety)
+set.seed(100)
+train <- sample(nrow(ntdf2), 0.7*nrow(ntdf2), replace=FALSE)
+TrainSet <- ntdf2[train,]
+ValidSet <- ntdf2[-train,]
+head(TrainSet)
+```
+
+
+### SVM Model and Predictions
+
+```{r}
+svmt1 <- svm(country ~ ., data = xtrain, type = 'C', kernel = 'linear', 
+             cross = 3, probability = TRUE)
+summary(svmt1)
+
+svmpr <- predict(svmt1, xtest, type = 'prob')
+svmpr <- as.data.frame(svmpr)
+colnames(svmpr) <- 'predictions'
+summary(svmpr)
+```
+
+
+
+### SVM Predictions
+```{r echo=FALSE}
+ggplot(svmpr, aes(x=predictions)) + geom_bar(col=I('black'), fill=I('blue'))
+
+```
+
+
+### Filtering Data to Wines over 87 Points
+```{r echo=FALSE}
+
+
+###filtering again but for wines rated above average.
+df_no_desc <- df
+df_no_desc <- na.omit(df_no_desc)
+df_no_desc$description <- NULL
+df_no_desc$above_87 <- as.factor(df_no_desc$points > 87)
+```
+
+
+```{r}
+#new split of the data
+x2 <- sample(nrow(df_no_desc), nrow(df_no_desc) * 2/3)
+x2train <- df_no_desc[x, ]
+x2test <- df_no_desc[-x, ]
+```
+
+### SVM for Wines Rated Above Average
+
+```{r echo=FALSE}
+#another support vector Machine model for above average wines
+svm_p <- svm(above_87 ~ country + price + variety, data = x2train, 
+             type = 'C', kernel = 'linear', 
+             cross = 3, probability = TRUE)
+summary(svm_p)
+svm_points <- predict(svm_p, x2test, type = 'prob')
+svm_points <- as.data.frame(svm_points)
+colnames(svm_points) <- 'predictions'
+summary(svm_points)
+```
+
+
+
+-----------------------------------------------------------------------
+### Plot of SVM Above Average
+```{r echo=FALSE}
+
+#plotting model
+ggplot(svm_points, aes(x=predictions)) + geom_bar(col=I('black'), fill=I('blue'))
+```
+
+
+**Decision Tree & Linear Model**
+==================================================================
+
+
+
+
+### Decision Tree
+```{r}
+#decision tree
+DecisionTree <- rpart(above_87 ~ country + price + variety, data = x2train, method = 'class', 
+                      control = rpart.control(cp = 0, minsplit = 2, maxdepth = 3))
+#summary(DecisionTree)
+fancyRpartPlot(DecisionTree, cex=.7)
+```
+
+
+
+
+### Distribution of Price
+```{r echo=FALSE}
+
+###Linear model plus more charts
+ggplot(df, aes(x=log(price), col=I('black'), fill=I('blue'))) +geom_histogram()
+
+```
+
+### Linear Model of Points by Price and Country
+```{r}
+lm1 <- (lm(df$points ~ df$price+df$country))
+```
+
+### Model Summary
+```{r}
+summary(lm1)
+```
+
+
+### Plots of Model
+```{r echo=FALSE}
+
+plot(lm1)
+lm2 <- (lm(df$points ~ df$price))
+#summary(lm2)
+```
+
+**Naive Bayes**
+===============================================================
+
+### Naive Bayes
+```{r echo=FALSE}
+#Naive Bayes model
+nb1 <- naiveBayes(as.factor(country) ~ ., data = xtrain)
+summary(nb1)
+nbpred1 <- predict(nb1, xtrain, type = 'class')
+
+summary(nbpred1)
+
+nb2 <- predict(nb1, xtest, type = 'class')
+nb2 <- data.frame(nb2)
+colnames(nb2)[1] <- 'country'
+nb2$row <- 1:nrow(nb2)
+nb2 <- nb2 %>% select(row, country)
+head(nb2, n = 20)
+#table(nb2)
+
+
+```
+
+### Naive Bayes for Average Points of Above 87
+```{r echo=FALSE}
+nb_p <- naiveBayes(as.factor(above_87) ~ ., data = x2train)
+summary(nb_p)
+nb_pr <- predict(nb_p, x2train, type = 'class')
+
+
+nb_p2 <- predict(nb_p, x2test, type = 'class')
+summary(nb_p2)
+nb_p2 <- data.frame(nb_p2)
+colnames(nb_p2)[1] <- 'above_87'
+nb2$row <- 1:nrow(nb2)
+nb2 <- nb2 %>% select(row, country)
+head(nb2, n = 20)
+#table(nb2)
+
+nbTrain <- naiveBayes(as.factor(above_87) ~ ., data = x2train)
+nbTrainPred <- predict(nbTrain, x2train, type = 'class')
+
+```
+
+**Review Text**
+============================================================
+```{r}
+clean_corpus<-function(text){
+  text_corpus<-Corpus(VectorSource(text),readerControl=list(language="english"))%>%
+    tm_map(stripWhitespace)%>%
+    tm_map(tolower)%>%
+    tm_map(removeWords,c(stopwords("english"),"wine"))%>%
+    tm_map(stemDocument)
+  return(text_corpus)
+}
+
+```
+
+```{r echo=FALSE}
+corpus<-clean_corpus(df$description)
+```
+
+
+
+```{r echo=FALSE}
+dtm<-DocumentTermMatrix(corpus)
+term_freq<-findFreqTerms(dtm,1200)
+dtm<-TermDocumentMatrix(corpus,control=
+                          list(dictionary=term_freq,removeNumbers=TRUE,
+                               stopwords=TRUE,
+                               weighting=weightTfIdf))
+
+
+dtm_matrix<-as.matrix(dtm)
+term_freq1<-rowSums(dtm_matrix)[order(rowSums(dtm_matrix), 
+                                      decreasing = TRUE)]
+
+
+```
+
+
+
+
+### Wordcloud
+```{r}
+
+wordfreq<-data.frame(word=names(term_freq1),freq=term_freq1)
+wordcloud2(wordfreq)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
