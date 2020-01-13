@@ -53,7 +53,7 @@ library(shiny)
 ```
 
 ```{r echo=FALSE}
-setwd("C:\\Users\\wes\\Desktop\\Datasets")
+setwd("C:\\Users...Datasets") #put your path here
 df <- read.csv("winemag.csv")
 df <- tbl_df(df)
 #str(df)
